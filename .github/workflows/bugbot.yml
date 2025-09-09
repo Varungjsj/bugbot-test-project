@@ -19,6 +19,7 @@ jobs:
       (github.event_name == 'issue_comment' && 
        github.event.issue.pull_request && 
        (contains(github.event.comment.body, '@bugbot run') || 
+        contains(github.event.comment.body, 'bugbot run') ||
         contains(github.event.comment.body, '@cursor fix')))
     
     steps:
@@ -35,39 +36,100 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install flake8 mypy pylint black isort
+          pip install flake8 mypy pylint black isort bandit safety
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
       
-      - name: Run static analysis
+      - name: Run Bug Detection
+        id: bug_detection
         run: |
-          echo "Running static analysis on Python files..."
+          echo "## Running Bug Detection Analysis..." >> $GITHUB_STEP_SUMMARY
           
-          # Run flake8
-          echo "=== Flake8 Analysis ==="
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
+          # Run our custom bug detector
+          python bug_detector.py --output bug_report.md
           
-          # Run pylint
-          echo "=== Pylint Analysis ==="
-          find . -name "*.py" -not -path "./venv/*" | xargs pylint --disable=all --enable=E || true
+          # Save the report for the comment
+          echo "BUG_REPORT<<EOF" >> $GITHUB_OUTPUT
+          cat bug_report.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
           
-          # Check with mypy
-          echo "=== Type Checking with mypy ==="
-          mypy . --ignore-missing-imports || true
+          # Also add to step summary
+          cat bug_report.md >> $GITHUB_STEP_SUMMARY
+          
+          # Run additional linters and capture output
+          echo -e "\n## Additional Analysis\n" >> analysis_report.md
+          
+          echo "### Flake8 Results" >> analysis_report.md
+          flake8 . --exclude=venv,__pycache__,.git --max-line-length=120 >> analysis_report.md 2>&1 || echo "Flake8 found some issues" >> analysis_report.md
+          
+          echo -e "\n### Security Analysis (Bandit)" >> analysis_report.md
+          bandit -r . -f txt >> analysis_report.md 2>&1 || echo "Bandit found some security concerns" >> analysis_report.md
+          
+          # Combine reports
+          echo -e "\n---\n" >> bug_report.md
+          cat analysis_report.md >> bug_report.md
       
-      - name: Comment PR
+      - name: Comment PR (for PR events)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('bug_report.md', 'utf8');
+            
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && comment.body.includes('Bug Detection Report')
+            );
+            
+            const body = `## 🤖 Automated Bug Detection Results\n\n${report}\n\n---\n*This analysis was performed automatically. For more detailed Bugbot functionality, consider installing the [Cursor Bugbot GitHub App](https://github.com/apps/cursor-bot).*`;
+            
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+      
+      - name: Comment PR (for issue comments)
         if: github.event_name == 'issue_comment'
         uses: actions/github-script@v6
         with:
           script: |
-            const comment = `## Bugbot Analysis Complete
+            const fs = require('fs');
+            const report = fs.readFileSync('bug_report.md', 'utf8');
             
-            Static analysis has been performed on the Python files in this PR.
-            Check the workflow logs for detailed results.
+            const body = `## 🤖 Bugbot Analysis Complete\n\n${report}\n\n---\n*Analysis triggered by @${context.actor}*\n\n*This is an automated bug detection workflow. For enhanced Bugbot features, install the [Cursor Bugbot GitHub App](https://github.com/apps/cursor-bot).*`;
             
-            *Note: This is a placeholder workflow. For full Bugbot functionality, please ensure the Cursor Bugbot GitHub App is installed on this repository.*`;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
+            await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: comment
+              issue_number: context.issue.number,
+              body: body
             });
+      
+      - name: Upload Bug Report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: bug-detection-report
+          path: |
+            bug_report.md
+            analysis_report.md
