@@ -1,0 +1,9 @@
+{
+  "bugbot": {
+    "enabled": true,
+    "autoFix": true,
+    "languages": ["python"],
+    "checkOnPullRequest": true,
+    "respondToComments": true
+  }
+}
