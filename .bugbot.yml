@@ -1,0 +1,56 @@
+# Bugbot Configuration
+# This file configures Cursor's Bugbot for this repository
+
+# Enable Bugbot on pull requests
+enabled: true
+
+# Language-specific settings
+languages:
+  python:
+    enabled: true
+    # Python-specific bug detection rules
+    checks:
+      - syntax_errors
+      - type_errors
+      - undefined_variables
+      - unused_imports
+      - code_smells
+      - security_vulnerabilities
+      - performance_issues
+    
+    # File patterns to analyze
+    include:
+      - "**/*.py"
+    
+    # File patterns to exclude
+    exclude:
+      - "**/venv/**"
+      - "**/node_modules/**"
+      - "**/__pycache__/**"
+      - "**/build/**"
+      - "**/dist/**"
+
+# General settings
+settings:
+  # Automatically fix simple issues
+  auto_fix: false
+  
+  # Comment on PR with findings
+  comment_on_pr: true
+  
+  # Fail the check if critical issues are found
+  fail_on_critical: true
+  
+  # Maximum number of issues to report
+  max_issues: 50
+
+# Security scanning
+security:
+  enabled: true
+  scan_dependencies: true
+  
+# Code quality thresholds
+quality:
+  min_maintainability_index: 20
+  max_complexity: 10
+  max_line_length: 120
